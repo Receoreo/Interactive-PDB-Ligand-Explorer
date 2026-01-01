@@ -18,7 +18,7 @@ def get_data(pdb_id):
     return structure, file_path, structure.header
 
 @st.cache_data
-def find_interactions(structure, distance_cutoff=5.0):
+def find_interactions(_structure, distance_cutoff=5.0):
     """Ligand-Protein etkileşimlerini hesaplar."""
     atoms = list(structure.get_atoms())
     ns = NeighborSearch(atoms)

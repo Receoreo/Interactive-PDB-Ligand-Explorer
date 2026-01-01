@@ -4,11 +4,10 @@ import pandas as pd
 import os
 from stmol import showmol
 import py3Dmol
+import numpy as np 
 
-# --- 1. AYARLAR ---
 st.set_page_config(page_title="BioVis Pro", layout="wide", page_icon="🧬")
 
-# --- 2. VERİ ÇEKME (BACKEND) ---
 @st.cache_data
 def get_structure(pdb_id):
     pdbl = PDBList()
@@ -17,7 +16,6 @@ def get_structure(pdb_id):
     structure = parser.get_structure(pdb_id, file_path)
     return structure, file_path
 
-# --- 3. HESAPLAMA MOTORU ---
 def find_interactions(structure, distance_cutoff=5.0):
     atoms = list(structure.get_atoms())
     ns = NeighborSearch(atoms)
@@ -34,7 +32,8 @@ def find_interactions(structure, distance_cutoff=5.0):
                         if n != residue:
                             dist = 0
                             if 'CA' in n:
-                                dist = n['CA'] - residue.center_of_mass()
+                                diff = n['CA'].coord - residue.center_of_mass()
+                                dist = np.linalg.norm(diff)
                             
                             interactions.append({
                                 "Ligand": residue.resname,
@@ -46,7 +45,6 @@ def find_interactions(structure, distance_cutoff=5.0):
                             
     return pd.DataFrame(interactions)
 
-# --- 4. GÖRSELLEŞTİRME ---
 def render_3d_view(pdb_file_path, ligand_resname, show_surface):
     with open(pdb_file_path, 'r') as f:
         pdb_data = f.read()
@@ -65,7 +63,6 @@ def render_3d_view(pdb_file_path, ligand_resname, show_surface):
     view.zoomTo({'resn': ligand_resname})
     return view
 
-# --- 5. ANA UYGULAMA AKIŞI ---
 def main():
     st.sidebar.title("⚙️ Kontrol Paneli")
     pdb_id = st.sidebar.text_input("PDB ID:", value="1CBS").upper()

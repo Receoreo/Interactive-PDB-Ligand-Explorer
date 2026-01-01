@@ -123,4 +123,31 @@ def main():
                     
                     if not df_interactions.empty:
                         ligand_list = df_interactions['Ligand'].unique()
-                        selected_ligand = st.selectbox("İncel
+                        selected_ligand = st.selectbox("İncelenecek Ligand:", ligand_list)
+                        
+                        c1, c2 = st.columns([1, 2])
+                        with c1:
+                            st.write("### 📏 Etkileşimler")
+                            subset_df = df_interactions[df_interactions['Ligand'] == selected_ligand]
+                            st.dataframe(subset_df, height=400)
+                        with c2:
+                            st.write("### 🧪 3D Yapı")
+                            view = render_3d_view(file_path, selected_ligand, show_surf, style_type)
+                            showmol(view, height=500, width=700)
+                    else:
+                        st.warning("Bu yapıda uygun bir ligand bulunamadı. Sadece proteini görüntülüyorsunuz.")
+                        view = render_3d_view(file_path, None, show_surf, style_type)
+                        showmol(view, height=500, width=700)
+
+                with tab3:
+                    st.subheader("Protein Zincir İstatistikleri")
+                    chain_df = get_chain_info(structure)
+                    st.table(chain_df)
+                    
+                    st.bar_chart(chain_df.set_index("Chain ID"))
+
+        except Exception as e:
+            st.error(f"Bir hata oluştu: {e}")
+
+if __name__ == "__main__":
+    main()

@@ -1,21 +1,20 @@
 import streamlit as st
 from Bio.PDB import PDBList, PDBParser, NeighborSearch, Polypeptide
-from Bio.SeqUtils import seq1
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 import pandas as pd
 import numpy as np
 import os
 from stmol import showmol
 import py3Dmol
-import altair as alt
 
-st.set_page_config(page_title="BioVis Pro V3", layout="wide", page_icon="🧬")
+# Sayfa ayarı EN ÜSTTE olmalı
+st.set_page_config(page_title="BioVis Pro V3.1", layout="wide", page_icon="🧬")
 
 # --- CSS İle Biraz Makyaj ---
 st.markdown("""
 <style>
     .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 4px 4px 0 0; }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #262730; border-radius: 4px 4px 0 0; }
     .stTabs [aria-selected="true"] { background-color: #ff4b4b; color: white; }
 </style>
 """, unsafe_allow_html=True)
@@ -25,20 +24,20 @@ def get_data(pdb_id):
     """PDB dosyasını indirir ve parse eder."""
     pdbl = PDBList()
     try:
-        file_path = pdbl.retrieve_pdb_file(pdb_id, pdir='data', file_format='pdb')
+        # obsolete=False parametresi eski yapıların yerine yenisini indirmeyi önler, daha stabildir.
+        file_path = pdbl.retrieve_pdb_file(pdb_id, pdir='data', file_format='pdb', obsolete=False)
         parser = PDBParser(QUIET=True)
         structure = parser.get_structure(pdb_id, file_path)
         return structure, file_path, structure.header
     except Exception as e:
-        st.error(f"PDB ID hatalı veya indirilemedi: {e}")
         return None, None, None
 
 @st.cache_data
-def analyze_sequence(structure):
+def analyze_sequence(_structure):
     """Zincirlerin biyokimyasal özelliklerini analiz eder (RCSB benzeri)."""
     chain_data = []
     
-    for model in structure:
+    for model in _structure:
         for chain in model:
             # Polypeptide.PPBuilder ile sadece protein kısımlarını al
             ppb = Polypeptide.PPBuilder()
@@ -46,15 +45,21 @@ def analyze_sequence(structure):
             
             # Eğer protein dizisi varsa (DNA/RNA değilse)
             if len(pp_list) > 0:
-                sequence = str(pp_list[0].get_sequence())
-                analyzed_seq = ProteinAnalysis(sequence)
+                # Birden fazla fragment varsa birleştir
+                sequence = "".join([str(pp.get_sequence()) for pp in pp_list])
                 
-                mw = analyzed_seq.molecular_weight()
-                aromaticity = analyzed_seq.aromaticity()
-                instability = analyzed_seq.instability_index()
-                isoelectric = analyzed_seq.isoelectric_point()
-                aa_count = analyzed_seq.count_amino_acids()
-                
+                try:
+                    analyzed_seq = ProteinAnalysis(sequence)
+                    mw = analyzed_seq.molecular_weight()
+                    aromaticity = analyzed_seq.aromaticity()
+                    instability = analyzed_seq.instability_index()
+                    isoelectric = analyzed_seq.isoelectric_point()
+                    aa_count = analyzed_seq.count_amino_acids()
+                except:
+                    # Analiz hatası olursa (örn: X gibi bilinmeyen amino asitler)
+                    mw, aromaticity, instability, isoelectric = 0, 0, 0, 0
+                    aa_count = {}
+
                 chain_data.append({
                     "Zincir": chain.id,
                     "Tip": "Protein",
@@ -94,27 +99,32 @@ def find_interactions(_structure, distance_cutoff=5.0):
             for residue in chain:
                 # Sadece HETATM (Ligandlar) ve Su olmayanlar
                 if residue.id[0].startswith("H_") and residue.resname != "HOH":
-                    ligand_center = residue.center_of_mass()
-                    neighbors = ns.search(ligand_center, distance_cutoff, level='R')
-                    
-                    for n in neighbors:
-                        if n != residue:
-                            dist = 0
-                            if 'CA' in n:
-                                diff = n['CA'].coord - residue.center_of_mass()
-                                dist = np.linalg.norm(diff)
-                            
-                            interactions.append({
-                                "Ligand": residue.resname,
-                                "Zincir": chain.id,
-                                "Etkileşen": n.resname,
-                                "Res ID": n.id[1],
-                                "Mesafe (Å)": round(dist, 2)
-                            })
+                    try:
+                        ligand_center = residue.center_of_mass()
+                        neighbors = ns.search(ligand_center, distance_cutoff, level='R')
+                        
+                        for n in neighbors:
+                            if n != residue:
+                                dist = 0
+                                if 'CA' in n:
+                                    diff = n['CA'].coord - residue.center_of_mass()
+                                    dist = np.linalg.norm(diff)
+                                
+                                interactions.append({
+                                    "Ligand": residue.resname,
+                                    "Zincir": chain.id,
+                                    "Etkileşen": n.resname,
+                                    "Res ID": n.id[1],
+                                    "Mesafe (Å)": round(dist, 2)
+                                })
+                    except:
+                        continue # Hata veren rezidüyü atla
                             
     return pd.DataFrame(interactions)
 
 def render_3d_view(pdb_file_path, ligand_resname, show_surface, style_type, color_scheme):
+    if not pdb_file_path: return None
+    
     with open(pdb_file_path, 'r') as f:
         pdb_data = f.read()
 
@@ -188,9 +198,3 @@ def main():
                     col1.metric("Sınıf", header.get('head', 'N/A'))
                     col2.metric("Çözünürlük", f"{header.get('resolution', 'N/A')} Å")
                     col3.metric("Yöntem", header.get('structure_method', 'N/A'))
-                    
-                    st.info(f"**Protein Adı:** {header.get('name', 'Bilinmiyor')}")
-                    
-                    with st.expander("📚 Referans ve Yazarlar"):
-                        st.write(header.get('author', 'Veri yok'))
-                        st.write

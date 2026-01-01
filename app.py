@@ -10,7 +10,6 @@ st.set_page_config(page_title="BioVis Pro V2", layout="wide", page_icon="🧬")
 
 @st.cache_data
 def get_data(pdb_id):
-    """PDB dosyasını indirir, parse eder ve Header bilgisini döndürür."""
     pdbl = PDBList()
     file_path = pdbl.retrieve_pdb_file(pdb_id, pdir='data', file_format='pdb')
     parser = PDBParser(QUIET=True)
@@ -19,12 +18,11 @@ def get_data(pdb_id):
 
 @st.cache_data
 def find_interactions(_structure, distance_cutoff=5.0):
-    """Ligand-Protein etkileşimlerini hesaplar."""
-    atoms = list(structure.get_atoms())
+    atoms = list(_structure.get_atoms())
     ns = NeighborSearch(atoms)
     interactions = []
     
-    for model in structure:
+    for model in _structure:
         for chain in model:
             for residue in chain:
                 if residue.id[0].startswith("H_") and residue.resname != "HOH":
@@ -49,7 +47,6 @@ def find_interactions(_structure, distance_cutoff=5.0):
     return pd.DataFrame(interactions)
 
 def get_chain_info(structure):
-    """Zincirlerin uzunluklarını ve tiplerini çıkarır."""
     chain_data = []
     for model in structure:
         for chain in model:
@@ -126,31 +123,4 @@ def main():
                     
                     if not df_interactions.empty:
                         ligand_list = df_interactions['Ligand'].unique()
-                        selected_ligand = st.selectbox("İncelenecek Ligand:", ligand_list)
-                        
-                        c1, c2 = st.columns([1, 2])
-                        with c1:
-                            st.write("### 📏 Etkileşimler")
-                            subset_df = df_interactions[df_interactions['Ligand'] == selected_ligand]
-                            st.dataframe(subset_df, height=400)
-                        with c2:
-                            st.write("### 🧪 3D Yapı")
-                            view = render_3d_view(file_path, selected_ligand, show_surf, style_type)
-                            showmol(view, height=500, width=700)
-                    else:
-                        st.warning("Bu yapıda uygun bir ligand bulunamadı. Sadece proteini görüntülüyorsunuz.")
-                        view = render_3d_view(file_path, None, show_surf, style_type)
-                        showmol(view, height=500, width=700)
-
-                with tab3:
-                    st.subheader("Protein Zincir İstatistikleri")
-                    chain_df = get_chain_info(structure)
-                    st.table(chain_df)
-                    
-                    st.bar_chart(chain_df.set_index("Chain ID"))
-
-        except Exception as e:
-            st.error(f"Bir hata oluştu: {e}")
-
-if __name__ == "__main__":
-    main()
+                        selected_ligand = st.selectbox("İncel

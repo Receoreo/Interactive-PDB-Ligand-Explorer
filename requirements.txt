@@ -3,5 +3,5 @@ biopython
 pandas
 py3Dmol
 stmol
+ipywidgets==7.7.1
 ipython_genutils
-ipywidgets

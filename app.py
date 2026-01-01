@@ -4,24 +4,32 @@ import numpy as np
 import os
 import matplotlib
 
-# --- KRİTİK DÜZELTME: SUNUCU MODU ---
-# Matplotlib'in sunucuda ekran aramamasını sağlar.
-# Bu satır 'import matplotlib.pyplot'tan ÖNCE gelmelidir.
+# --- KRİTİK: SUNUCU MODU (Black Screen Önleyici) ---
 matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Sayfa ayarı her şeyden önce gelmeli
-st.set_page_config(page_title="BioVis Pro V3.3 (Stable)", layout="wide", page_icon="🧬")
+# Sayfa Ayarları
+st.set_page_config(page_title="PDB Explorer by GeneticsBubble", layout="wide", page_icon="🧬")
 
-# Kütüphane yükleme kontrolü
+# Hata Yakalama ve Import
 try:
     from Bio.PDB import PDBList, PDBParser, NeighborSearch, Polypeptide
     from Bio.SeqUtils.ProtParam import ProteinAnalysis
     from stmol import showmol
     import py3Dmol
 except ImportError as e:
-    st.error(f"Kritik kütüphane eksik: {e}. Lütfen requirements.txt dosyasını kontrol edin.")
+    st.error(f"Kritik kütüphane eksik: {e}. requirements.txt dosyasını kontrol et.")
     st.stop()
+
+# --- SABİTLER ---
+# Kyte-Doolittle Hidrofobiklik Skalası
+KD_SCALE = {
+    'A': 1.8, 'R':-4.5, 'N':-3.5, 'D':-3.5, 'C': 2.5,
+    'Q':-3.5, 'E':-3.5, 'G':-0.4, 'H':-3.2, 'I': 4.5,
+    'L': 3.8, 'K':-3.9, 'M': 1.9, 'F': 2.8, 'P':-1.6,
+    'S':-0.8, 'T':-0.7, 'W':-0.9, 'Y':-1.3, 'V': 4.2
+}
 
 # --- FONKSİYONLAR ---
 
@@ -38,53 +46,46 @@ def get_data(pdb_id):
         return None, None, None
 
 @st.cache_data
-def analyze_sequence(_structure):
-    """Zincir analizi yapar."""
-    chain_data = []
+def get_detailed_chain_metrics(_structure):
+    """Zincir bazlı detaylı sayısal veriler çıkarır (Seaborn için)."""
+    chain_metrics = {}
+    
     for model in _structure:
         for chain in model:
-            ppb = Polypeptide.PPBuilder()
-            pp_list = ppb.build_peptides(chain)
+            residues = []
+            for res in chain:
+                # Sadece standart amino asitler
+                if res.id[0] == ' ':
+                    try:
+                        res_name = res.resname
+                        res_id = res.id[1]
+                        # 3 harfli kodu 1 harfli koda çevir (basit mapping)
+                        # Biopython'da seq1 import etmeden manuel mapping daha güvenli şu an
+                        one_letter = Polypeptide.three_to_one(res_name) if res_name in Polypeptide.standard_aa_names else 'X'
+                        
+                        # B-Factor (Sıcaklık Faktörü) ortalaması
+                        b_factors = [atom.bfactor for atom in res]
+                        avg_bfactor = sum(b_factors) / len(b_factors) if b_factors else 0
+                        
+                        residues.append({
+                            'Residue Index': res_id,
+                            'AA': one_letter,
+                            'Hydrophobicity': KD_SCALE.get(one_letter, 0),
+                            'B-Factor': avg_bfactor,
+                            # Basit bir moleküler ağırlık (yaklaşık)
+                            'Mol Weight': ProteinAnalysis(one_letter).molecular_weight() if one_letter != 'X' else 0
+                        })
+                    except:
+                        continue
             
-            if len(pp_list) > 0:
-                sequence = "".join([str(pp.get_sequence()) for pp in pp_list])
-                try:
-                    analyzed_seq = ProteinAnalysis(sequence)
-                    mw = analyzed_seq.molecular_weight()
-                    isoelectric = analyzed_seq.isoelectric_point()
-                    aa_count = analyzed_seq.count_amino_acids()
-                    instability = analyzed_seq.instability_index()
-                except:
-                    mw, isoelectric, instability = 0, 0, 0
-                    aa_count = {}
-
-                chain_data.append({
-                    "Zincir": chain.id,
-                    "Tip": "Protein",
-                    "Uzunluk": len(sequence),
-                    "Mol. Ağırlık": round(mw, 2),
-                    "pI": round(isoelectric, 2),
-                    "Kararsızlık": round(instability, 2),
-                    "Dizi": sequence,
-                    "AA_Count": aa_count
-                })
-            else:
-                residues = list(chain.get_residues())
-                chain_data.append({
-                    "Zincir": chain.id,
-                    "Tip": "Ligand/DNA/RNA",
-                    "Uzunluk": len(residues),
-                    "Mol. Ağırlık": 0,
-                    "pI": 0,
-                    "Kararsızlık": 0,
-                    "Dizi": "",
-                    "AA_Count": {}
-                })
-    return pd.DataFrame(chain_data)
+            if residues:
+                chain_metrics[chain.id] = pd.DataFrame(residues)
+                
+    return chain_metrics
 
 @st.cache_data
 def find_interactions(_structure, distance_cutoff=5.0):
-    """Etkileşimleri hesaplar."""
+    """Ligand-Protein etkileşimleri."""
     atoms = list(_structure.get_atoms())
     ns = NeighborSearch(atoms)
     interactions = []
@@ -144,67 +145,116 @@ def render_3d_view(pdb_file_path, ligand_resname, show_surface, style_type, colo
 
 # --- ANA UYGULAMA ---
 def main():
-    st.title("🧬 BioVis Pro: Stable Mode")
+    st.title("🧬 Interactive PDB Ligand Explorer by GeneticsBubble")
     
     with st.sidebar.form(key='control_panel'):
         st.header("⚙️ Ayarlar")
-        pdb_input = st.text_input("PDB ID:", value="9NXY").upper()
+        # VARSAYILAN DEĞER 3HTB OLARAK DEĞİŞTİ
+        pdb_input = st.text_input("PDB ID:", value="3HTB").upper()
+        
         style_type = st.selectbox("Stil", ["Cartoon", "Stick", "Sphere"])
         color_scheme = st.selectbox("Renk", ["Gökkuşağı", "Zincir", "Element", "B-Faktörü"])
         show_surf = st.checkbox("Yüzey Göster", value=False)
-        submit_btn = st.form_submit_button("Analiz Et")
+        submit_btn = st.form_submit_button("Analiz Et 🚀")
 
     if submit_btn or pdb_input:
         if not os.path.exists('data'): os.makedirs('data')
         
-        with st.spinner('Veriler İşleniyor...'):
+        with st.spinner('GeneticsBubble motoru çalışıyor... Veriler işleniyor...'):
             structure, file_path, header = get_data(pdb_input)
             
             if structure:
-                tab1, tab2, tab3 = st.tabs(["Genel", "3D Yapı", "Analiz"])
+                # --- VERİ HAZIRLIĞI ---
+                chain_dfs = get_detailed_chain_metrics(structure)
                 
+                # --- TABLAR ---
+                tab1, tab2, tab3 = st.tabs(["📋 Genel Bakış", "🧪 3D Yapı & Etkileşim", "📈 İleri Düzey Grafik Analizi"])
+                
+                # --- TAB 1: GENEL ---
                 with tab1:
-                    c1, c2 = st.columns(2)
+                    c1, c2, c3 = st.columns(3)
                     c1.metric("Çözünürlük", f"{header.get('resolution', 'N/A')} Å")
-                    c2.metric("Metot", header.get('structure_method', 'N/A'))
-                    st.info(header.get('name', 'İsimsiz'))
+                    c2.metric("Yöntem", header.get('structure_method', 'N/A'))
+                    c3.metric("Yayın Tarihi", header.get('deposition_date', 'N/A'))
+                    
+                    st.info(f"**Makromolekül Adı:** {header.get('name', 'Bilinmiyor')}")
+                    st.write(f"**Kaynak:** {header.get('source', 'Bilinmiyor')}")
+                    st.caption(f"Yazarlar: {header.get('author', '-')}")
 
+                # --- TAB 2: 3D YAPI ---
                 with tab2:
                     df_int = find_interactions(structure)
                     ligand = None
-                    if not df_int.empty:
-                        ligand = st.selectbox("Ligand Seç:", df_int['Ligand'].unique())
                     
-                    view = render_3d_view(file_path, ligand, show_surf, style_type, color_scheme)
-                    showmol(view, height=500, width=700)
+                    col_3d, col_table = st.columns([2, 1])
+                    
+                    with col_table:
+                        if not df_int.empty:
+                            st.subheader("Ligand Listesi")
+                            ligand = st.selectbox("İncelenecek Ligand:", df_int['Ligand'].unique())
+                            
+                            st.write("Etkileşimler:")
+                            subset = df_int[df_int['Ligand'] == ligand]
+                            st.dataframe(subset[['Etkileşen', 'Res ID', 'Mesafe (Å)']], height=400)
+                        else:
+                            st.warning("Ligand etkileşimi bulunamadı.")
+                            
+                    with col_3d:
+                        view = render_3d_view(file_path, ligand, show_surf, style_type, color_scheme)
+                        showmol(view, height=500, width=700)
 
+                # --- TAB 3: GRAFİKLER (SEABORN POWER) ---
                 with tab3:
-                    df_chains = analyze_sequence(structure)
-                    df_prot = df_chains[df_chains['Tip'] == 'Protein']
-                    
-                    if not df_prot.empty:
-                        st.dataframe(df_prot[["Zincir", "Uzunluk", "Mol. Ağırlık", "pI"]])
+                    if chain_dfs:
+                        selected_chain = st.selectbox("Analiz Edilecek Zincir:", list(chain_dfs.keys()))
+                        df_chain = chain_dfs[selected_chain]
                         
-                        chain_sel = st.selectbox("Zincir Analizi:", df_prot['Zincir'].unique())
-                        row = df_prot[df_prot['Zincir'] == chain_sel].iloc[0]
+                        st.markdown(f"### 🧬 Zincir {selected_chain} - Biyoistatistiksel Analiz")
                         
-                        # --- MATPLOTLIB GRAFİĞİ (AGG BACKEND İLE) ---
-                        st.write("Amino Asit Dağılımı:")
-                        aa_counts = row['AA_Count']
-                        if aa_counts:
-                            # Figure oluştururken explicit boyut veriyoruz
-                            fig = plt.figure(figsize=(10, 4))
-                            plt.bar(aa_counts.keys(), aa_counts.values(), color='#4e79a7')
-                            plt.xlabel("Amino Asit")
-                            plt.ylabel("Sayı")
-                            st.pyplot(fig) # Streamlit'e figürü gönder
+                        # GRAFİK 1: HİDROPATİ & B-FACTOR (Lineplot)
+                        st.write("#### 🌊 Hidrofobiklik ve Stabilite Analizi")
+                        fig1, ax1 = plt.subplots(figsize=(10, 4))
+                        # Hidrofobiklik (Mavi)
+                        sns.lineplot(data=df_chain, x='Residue Index', y='Hydrophobicity', label='Hidrofobiklik (Kyte-Doolittle)', color='blue', alpha=0.6, ax=ax1)
+                        # B-Factor (Kırmızı)
+                        ax2 = ax1.twinx()
+                        sns.lineplot(data=df_chain, x='Residue Index', y='B-Factor', label='B-Factor (Esneklik)', color='red', alpha=0.4, ax=ax2)
                         
-                        with st.expander("FASTA Dizisini Göster"):
-                            st.code(row['Dizi'], language='text')
+                        ax1.set_ylabel("Hidrofobiklik Skoru")
+                        ax2.set_ylabel("B-Factor (Sıcaklık)")
+                        st.pyplot(fig1)
+                        st.caption("*Mavi çizgiler yukarı çıktıkça bölge sudan kaçar (hidrofobik core). Kırmızı çizgiler yüksekse o bölge çok hareketlidir (esnek loop).*")
+
+                        col_heat, col_dist = st.columns(2)
+                        
+                        # GRAFİK 2: KORELASYON ISI HARİTASI (Heatmap)
+                        with col_heat:
+                            st.write("#### 🔥 Özellik Korelasyon Matrisi")
+                            corr_data = df_chain[['Hydrophobicity', 'B-Factor', 'Mol Weight', 'Residue Index']].corr()
+                            fig2, ax2 = plt.subplots(figsize=(6, 5))
+                            sns.heatmap(corr_data, annot=True, cmap='coolwarm', fmt=".2f", ax=ax2)
+                            st.pyplot(fig2)
+                            st.caption("Amino asit özelliklerinin birbirleriyle ilişkisi.")
+
+                        # GRAFİK 3: AA DAĞILIMI (Countplot)
+                        with col_dist:
+                            st.write("#### 📊 Amino Asit Kompozisyonu")
+                            fig3, ax3 = plt.subplots(figsize=(6, 5))
+                            sns.countplot(data=df_chain, y='AA', order=df_chain['AA'].value_counts().index, palette='viridis', ax=ax3)
+                            ax3.set_xlabel("Sayı")
+                            st.pyplot(fig3)
+
+                        # GRAFİK 4: VIOLIN PLOT (B-Factor Dağılımı)
+                        st.write("#### 🎻 Protein Esneklik Dağılımı (Violin Plot)")
+                        fig4, ax4 = plt.subplots(figsize=(8, 3))
+                        sns.violinplot(x=df_chain["B-Factor"], color="orange", ax=ax4)
+                        ax4.set_xlabel("B-Factor Değerleri")
+                        st.pyplot(fig4)
+                        
                     else:
-                        st.warning("Protein zinciri bulunamadı.")
+                        st.warning("Analiz edilecek protein zinciri verisi bulunamadı.")
             else:
-                st.error("PDB yüklenemedi. ID'yi kontrol edin.")
+                st.error("PDB verisi yüklenemedi. ID'yi kontrol edin.")
 
 if __name__ == "__main__":
     main()

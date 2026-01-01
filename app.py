@@ -2,20 +2,25 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import matplotlib
+
+# --- KRİTİK DÜZELTME: SUNUCU MODU ---
+# Matplotlib'in sunucuda ekran aramamasını sağlar.
+# Bu satır 'import matplotlib.pyplot'tan ÖNCE gelmelidir.
+matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 
-# --- KRİTİK AYARLAR ---
-# Bu komut kesinlikle dosyanın en başında olmalı
-st.set_page_config(page_title="BioVis Pro V3.2 (Safe)", layout="wide", page_icon="🧬")
+# Sayfa ayarı her şeyden önce gelmeli
+st.set_page_config(page_title="BioVis Pro V3.3 (Stable)", layout="wide", page_icon="🧬")
 
-# Kütüphane yükleme hatalarını önlemek için try-except blokları
+# Kütüphane yükleme kontrolü
 try:
     from Bio.PDB import PDBList, PDBParser, NeighborSearch, Polypeptide
     from Bio.SeqUtils.ProtParam import ProteinAnalysis
     from stmol import showmol
     import py3Dmol
 except ImportError as e:
-    st.error(f"Kütüphane hatası: {e}. Lütfen requirements.txt dosyasını kontrol edin.")
+    st.error(f"Kritik kütüphane eksik: {e}. Lütfen requirements.txt dosyasını kontrol edin.")
     st.stop()
 
 # --- FONKSİYONLAR ---
@@ -25,7 +30,6 @@ def get_data(pdb_id):
     """PDB dosyasını indirir."""
     pdbl = PDBList()
     try:
-        # obsolete=False: Eski yapıların üzerine yazılmasını önler
         file_path = pdbl.retrieve_pdb_file(pdb_id, pdir='data', file_format='pdb', obsolete=False)
         parser = PDBParser(QUIET=True)
         structure = parser.get_structure(pdb_id, file_path)
@@ -107,66 +111,4 @@ def find_interactions(_structure, distance_cutoff=5.0):
                                 })
                     except:
                         continue
-    return pd.DataFrame(interactions)
-
-def render_3d_view(pdb_file_path, ligand_resname, show_surface, style_type, color_scheme):
-    if not pdb_file_path: return None
-    with open(pdb_file_path, 'r') as f: pdb_data = f.read()
-
-    view = py3Dmol.view(width=800, height=600)
-    view.addModel(pdb_data, 'pdb')
-    
-    # Renk Ayarı
-    color_prop = {}
-    if color_scheme == "Gökkuşağı": color_prop = {'colorscheme': 'spectrum'}
-    elif color_scheme == "Zincir": color_prop = {'colorscheme': 'chain'}
-    elif color_scheme == "Element": color_prop = {'colorscheme': 'default'}
-    elif color_scheme == "B-Faktörü": color_prop = {'colorscheme': 'b'}
-
-    # Stil Ayarı
-    if style_type == "Cartoon": view.setStyle({'cartoon': {**color_prop, 'opacity': 0.9}})
-    elif style_type == "Stick": view.setStyle({'stick': {**color_prop, 'radius': 0.2}})
-    elif style_type == "Sphere": view.setStyle({'sphere': {**color_prop, 'scale': 0.3}})
-    
-    if show_surface: view.addSurface(py3Dmol.VDW, {'opacity':0.4, 'color':'#f0f2f6'})
-
-    if ligand_resname:
-        view.addStyle({'resn': ligand_resname}, {'stick': {'colorscheme': 'greenCarbon', 'radius': 0.4}})
-        view.zoomTo({'resn': ligand_resname})
-    else:
-        view.zoomTo()
-        
-    return view
-
-# --- ANA UYGULAMA ---
-def main():
-    st.title("🧬 BioVis Pro: Safe Mode")
-    
-    with st.sidebar.form(key='control_panel'):
-        st.header("⚙️ Ayarlar")
-        pdb_input = st.text_input("PDB ID:", value="9NXY").upper()
-        style_type = st.selectbox("Stil", ["Cartoon", "Stick", "Sphere"])
-        color_scheme = st.selectbox("Renk", ["Gökkuşağı", "Zincir", "Element", "B-Faktörü"])
-        show_surf = st.checkbox("Yüzey Göster", value=False)
-        submit_btn = st.form_submit_button("Analiz Et")
-
-    if submit_btn or pdb_input:
-        if not os.path.exists('data'): os.makedirs('data')
-        
-        with st.spinner('İşleniyor...'):
-            structure, file_path, header = get_data(pdb_input)
-            
-            if structure:
-                tab1, tab2, tab3 = st.tabs(["Genel", "3D Yapı", "Analiz"])
-                
-                with tab1:
-                    c1, c2 = st.columns(2)
-                    c1.metric("Çözünürlük", f"{header.get('resolution', 'N/A')} Å")
-                    c2.metric("Metot", header.get('structure_method', 'N/A'))
-                    st.info(header.get('name', 'İsimsiz'))
-
-                with tab2:
-                    df_int = find_interactions(structure)
-                    ligand = None
-                    if not df_int.empty:
-                        ligand
+    return pd.

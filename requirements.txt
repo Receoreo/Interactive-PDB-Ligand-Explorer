@@ -6,3 +6,4 @@ stmol
 ipywidgets==7.7.1
 ipython_genutils
 matplotlib
+seaborn

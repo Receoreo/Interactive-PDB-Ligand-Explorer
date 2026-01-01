@@ -111,4 +111,100 @@ def find_interactions(_structure, distance_cutoff=5.0):
                                 })
                     except:
                         continue
-    return pd.
+    return pd.DataFrame(interactions)
+
+def render_3d_view(pdb_file_path, ligand_resname, show_surface, style_type, color_scheme):
+    if not pdb_file_path: return None
+    with open(pdb_file_path, 'r') as f: pdb_data = f.read()
+
+    view = py3Dmol.view(width=800, height=600)
+    view.addModel(pdb_data, 'pdb')
+    
+    # Renk Ayarı
+    color_prop = {}
+    if color_scheme == "Gökkuşağı": color_prop = {'colorscheme': 'spectrum'}
+    elif color_scheme == "Zincir": color_prop = {'colorscheme': 'chain'}
+    elif color_scheme == "Element": color_prop = {'colorscheme': 'default'}
+    elif color_scheme == "B-Faktörü": color_prop = {'colorscheme': 'b'}
+
+    # Stil Ayarı
+    if style_type == "Cartoon": view.setStyle({'cartoon': {**color_prop, 'opacity': 0.9}})
+    elif style_type == "Stick": view.setStyle({'stick': {**color_prop, 'radius': 0.2}})
+    elif style_type == "Sphere": view.setStyle({'sphere': {**color_prop, 'scale': 0.3}})
+    
+    if show_surface: view.addSurface(py3Dmol.VDW, {'opacity':0.4, 'color':'#f0f2f6'})
+
+    if ligand_resname:
+        view.addStyle({'resn': ligand_resname}, {'stick': {'colorscheme': 'greenCarbon', 'radius': 0.4}})
+        view.zoomTo({'resn': ligand_resname})
+    else:
+        view.zoomTo()
+        
+    return view
+
+# --- ANA UYGULAMA ---
+def main():
+    st.title("🧬 BioVis Pro: Stable Mode")
+    
+    with st.sidebar.form(key='control_panel'):
+        st.header("⚙️ Ayarlar")
+        pdb_input = st.text_input("PDB ID:", value="9NXY").upper()
+        style_type = st.selectbox("Stil", ["Cartoon", "Stick", "Sphere"])
+        color_scheme = st.selectbox("Renk", ["Gökkuşağı", "Zincir", "Element", "B-Faktörü"])
+        show_surf = st.checkbox("Yüzey Göster", value=False)
+        submit_btn = st.form_submit_button("Analiz Et")
+
+    if submit_btn or pdb_input:
+        if not os.path.exists('data'): os.makedirs('data')
+        
+        with st.spinner('Veriler İşleniyor...'):
+            structure, file_path, header = get_data(pdb_input)
+            
+            if structure:
+                tab1, tab2, tab3 = st.tabs(["Genel", "3D Yapı", "Analiz"])
+                
+                with tab1:
+                    c1, c2 = st.columns(2)
+                    c1.metric("Çözünürlük", f"{header.get('resolution', 'N/A')} Å")
+                    c2.metric("Metot", header.get('structure_method', 'N/A'))
+                    st.info(header.get('name', 'İsimsiz'))
+
+                with tab2:
+                    df_int = find_interactions(structure)
+                    ligand = None
+                    if not df_int.empty:
+                        ligand = st.selectbox("Ligand Seç:", df_int['Ligand'].unique())
+                    
+                    view = render_3d_view(file_path, ligand, show_surf, style_type, color_scheme)
+                    showmol(view, height=500, width=700)
+
+                with tab3:
+                    df_chains = analyze_sequence(structure)
+                    df_prot = df_chains[df_chains['Tip'] == 'Protein']
+                    
+                    if not df_prot.empty:
+                        st.dataframe(df_prot[["Zincir", "Uzunluk", "Mol. Ağırlık", "pI"]])
+                        
+                        chain_sel = st.selectbox("Zincir Analizi:", df_prot['Zincir'].unique())
+                        row = df_prot[df_prot['Zincir'] == chain_sel].iloc[0]
+                        
+                        # --- MATPLOTLIB GRAFİĞİ (AGG BACKEND İLE) ---
+                        st.write("Amino Asit Dağılımı:")
+                        aa_counts = row['AA_Count']
+                        if aa_counts:
+                            # Figure oluştururken explicit boyut veriyoruz
+                            fig = plt.figure(figsize=(10, 4))
+                            plt.bar(aa_counts.keys(), aa_counts.values(), color='#4e79a7')
+                            plt.xlabel("Amino Asit")
+                            plt.ylabel("Sayı")
+                            st.pyplot(fig) # Streamlit'e figürü gönder
+                        
+                        with st.expander("FASTA Dizisini Göster"):
+                            st.code(row['Dizi'], language='text')
+                    else:
+                        st.warning("Protein zinciri bulunamadı.")
+            else:
+                st.error("PDB yüklenemedi. ID'yi kontrol edin.")
+
+if __name__ == "__main__":
+    main()
